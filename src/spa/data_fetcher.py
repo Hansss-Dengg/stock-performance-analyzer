@@ -6,9 +6,15 @@ import pandas as pd
 from typing import Optional
 from datetime import datetime, timedelta
 import re
+import logging
 
 from .exceptions import InvalidTickerError, DataFetchError, NoDataError
 from .cache import DataCache
+from .retry import retry_on_failure
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Global cache instance
 _cache = DataCache()
@@ -44,6 +50,39 @@ def _validate_ticker(ticker: str) -> str:
         raise InvalidTickerError(f"Ticker symbol too long: '{ticker}'")
     
     return ticker
+
+
+@retry_on_failure(
+    max_retries=3,
+    initial_delay=1.0,
+    backoff_factor=2.0,
+    exceptions=(ConnectionError, TimeoutError, Exception)
+)
+def _fetch_from_api(ticker: str, start_date: Optional[str], end_date: Optional[str], period: str) -> pd.DataFrame:
+    """
+    Internal function to fetch data from Yahoo Finance API with retry logic.
+    
+    Args:
+        ticker: Stock ticker symbol (already validated)
+        start_date: Start date in 'YYYY-MM-DD' format (optional)
+        end_date: End date in 'YYYY-MM-DD' format (optional)
+        period: Time period if dates not specified
+    
+    Returns:
+        DataFrame with historical stock data
+    
+    Raises:
+        Exception: If API call fails after retries
+    """
+    stock = yf.Ticker(ticker)
+    
+    # Fetch data based on parameters
+    if start_date and end_date:
+        df = stock.history(start=start_date, end=end_date)
+    else:
+        df = stock.history(period=period)
+    
+    return df
 
 
 def fetch_stock_data(
@@ -87,16 +126,14 @@ def fetch_stock_data(
     if use_cache:
         cached_data = _cache.get(ticker, **cache_params)
         if cached_data is not None:
+            logger.info(f"Cache hit for {ticker}")
             return cached_data
     
     try:
-        stock = yf.Ticker(ticker)
+        logger.info(f"Fetching data for {ticker} from API")
         
-        # Fetch data based on parameters
-        if start_date and end_date:
-            df = stock.history(start=start_date, end=end_date)
-        else:
-            df = stock.history(period=period)
+        # Fetch from API with retry logic
+        df = _fetch_from_api(ticker, start_date, end_date, period)
         
         if df.empty:
             raise NoDataError(
@@ -114,6 +151,7 @@ def fetch_stock_data(
         # Cache the data
         if use_cache:
             _cache.set(ticker, df, **cache_params)
+            logger.info(f"Cached data for {ticker}")
         
         return df
     
