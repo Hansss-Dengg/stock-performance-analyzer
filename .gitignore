@@ -7,6 +7,10 @@ env/
 __pycache__/
 *.py[cod]
 
+# Data cache
+.cache/
+*.pkl
+
 # IDE
 .vscode/
 .idea/
