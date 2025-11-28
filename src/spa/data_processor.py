@@ -1,12 +1,69 @@
 """
 Data processing module for calculating financial metrics and returns.
+
+This module provides comprehensive financial analysis tools including:
+- Return calculations (daily, cumulative, annualized)
+- Risk metrics (volatility, drawdown, downside deviation)
+- Technical indicators (moving averages, crossovers)
+- Performance summaries and ratios (Sharpe, Calmar)
 """
 import pandas as pd
 import numpy as np
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Constants
+TRADING_DAYS_PER_YEAR = 252
+BUSINESS_DAYS_PER_YEAR = 252
+
+
+def _validate_price_data(
+    df: pd.DataFrame,
+    price_column: str
+) -> None:
+    """
+    Validate that DataFrame has required price data.
+    
+    Args:
+        df: Input DataFrame
+        price_column: Column name to validate
+    
+    Raises:
+        ValueError: If validation fails
+    """
+    if df.empty:
+        raise ValueError("DataFrame is empty")
+    
+    if price_column not in df.columns:
+        raise ValueError(f"Column '{price_column}' not found in DataFrame")
+    
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("DataFrame must have DatetimeIndex")
+
+
+def _ensure_sufficient_data(
+    df: pd.DataFrame,
+    min_periods: int,
+    operation: str = "calculation"
+) -> None:
+    """
+    Ensure DataFrame has sufficient data points.
+    
+    Args:
+        df: Input DataFrame
+        min_periods: Minimum required periods
+        operation: Name of operation for error message
+    
+    Raises:
+        ValueError: If insufficient data
+    """
+    if len(df) < min_periods:
+        raise ValueError(
+            f"Insufficient data for {operation}. "
+            f"Required: {min_periods}, Available: {len(df)}"
+        )
 
 
 def calculate_daily_returns(
@@ -304,9 +361,9 @@ def calculate_volatility(
     # Calculate standard deviation
     volatility = returns.std()
     
-    # Annualize if requested (assuming 252 trading days per year)
+    # Annualize if requested
     if annualize:
-        volatility = volatility * np.sqrt(252)
+        volatility = volatility * np.sqrt(TRADING_DAYS_PER_YEAR)
     
     logger.info(f"Calculated volatility: {volatility:.4f}")
     
@@ -342,7 +399,7 @@ def calculate_rolling_volatility(
     
     # Annualize if requested
     if annualize:
-        rolling_vol = rolling_vol * np.sqrt(252)
+        rolling_vol = rolling_vol * np.sqrt(TRADING_DAYS_PER_YEAR)
     
     return rolling_vol
 
@@ -387,7 +444,7 @@ def calculate_downside_volatility(
     
     # Annualize if requested
     if annualize:
-        downside_vol = downside_vol * np.sqrt(252)
+        downside_vol = downside_vol * np.sqrt(TRADING_DAYS_PER_YEAR)
     
     return float(downside_vol)
 
@@ -438,3 +495,458 @@ def get_return_volatility_summary(
     }
     
     return summary
+
+
+def calculate_drawdown(
+    df: pd.DataFrame,
+    price_column: str = 'Close'
+) -> pd.Series:
+    """
+    Calculate drawdown series (percentage decline from peak).
+    
+    Args:
+        df: Input DataFrame with price data
+        price_column: Column to use for calculation
+    
+    Returns:
+        Series with drawdown values (negative percentages)
+    """
+    if df.empty:
+        return pd.Series(dtype=float)
+    
+    prices = df[price_column]
+    
+    # Calculate running maximum (peak)
+    running_max = prices.expanding().max()
+    
+    # Calculate drawdown
+    drawdown = (prices - running_max) / running_max
+    
+    return drawdown
+
+
+def calculate_max_drawdown(
+    df: pd.DataFrame,
+    price_column: str = 'Close'
+) -> float:
+    """
+    Calculate maximum drawdown (worst peak-to-trough decline).
+    
+    Args:
+        df: Input DataFrame with price data
+        price_column: Column to use for calculation
+    
+    Returns:
+        Maximum drawdown as decimal (e.g., -0.124 = -12.4% decline)
+    """
+    if df.empty:
+        return 0.0
+    
+    drawdown = calculate_drawdown(df, price_column)
+    max_dd = drawdown.min()
+    
+    logger.info(f"Maximum drawdown: {max_dd:.4f}")
+    
+    return float(max_dd)
+
+
+def calculate_drawdown_details(
+    df: pd.DataFrame,
+    price_column: str = 'Close'
+) -> Dict[str, Any]:
+    """
+    Calculate detailed drawdown information including dates and recovery.
+    
+    Args:
+        df: Input DataFrame with price data
+        price_column: Column to use for calculation
+    
+    Returns:
+        Dictionary with drawdown details
+    """
+    if df.empty:
+        return {}
+    
+    prices = df[price_column]
+    drawdown = calculate_drawdown(df, price_column)
+    
+    # Find max drawdown
+    max_dd = drawdown.min()
+    max_dd_date = drawdown.idxmin()
+    
+    # Find peak before max drawdown
+    prices_before_dd = prices[:max_dd_date]
+    if not prices_before_dd.empty:
+        peak_value = prices_before_dd.max()
+        peak_date = prices_before_dd.idxmax()
+    else:
+        peak_value = prices.iloc[0]
+        peak_date = prices.index[0]
+    
+    # Find recovery (if any)
+    prices_after_dd = prices[max_dd_date:]
+    recovered = (prices_after_dd >= peak_value).any()
+    
+    if recovered:
+        recovery_date = prices_after_dd[prices_after_dd >= peak_value].index[0]
+        recovery_days = (recovery_date - max_dd_date).days
+    else:
+        recovery_date = None
+        recovery_days = None
+    
+    trough_value = prices[max_dd_date]
+    drawdown_days = (max_dd_date - peak_date).days
+    
+    details = {
+        'max_drawdown': float(max_dd),
+        'max_drawdown_pct': round(max_dd * 100, 2),
+        'peak_date': peak_date,
+        'peak_value': float(peak_value),
+        'trough_date': max_dd_date,
+        'trough_value': float(trough_value),
+        'drawdown_days': drawdown_days,
+        'recovered': recovered,
+        'recovery_date': recovery_date,
+        'recovery_days': recovery_days,
+        'current_drawdown': float(drawdown.iloc[-1]),
+        'current_drawdown_pct': round(drawdown.iloc[-1] * 100, 2)
+    }
+    
+    return details
+
+
+def calculate_calmar_ratio(
+    df: pd.DataFrame,
+    price_column: str = 'Close'
+) -> float:
+    """
+    Calculate Calmar ratio (annualized return / max drawdown).
+    
+    Measures return per unit of downside risk.
+    
+    Args:
+        df: Input DataFrame with price data
+        price_column: Column to use for calculation
+    
+    Returns:
+        Calmar ratio
+    """
+    if df.empty:
+        return 0.0
+    
+    annualized_return = calculate_annualized_return(df, price_column)
+    max_dd = abs(calculate_max_drawdown(df, price_column))
+    
+    if max_dd == 0:
+        return 0.0
+    
+    calmar = annualized_return / max_dd
+    
+    return float(calmar)
+
+
+def calculate_moving_average(
+    df: pd.DataFrame,
+    window: int = 20,
+    price_column: str = 'Close',
+    ma_type: str = 'simple'
+) -> pd.Series:
+    """
+    Calculate moving average.
+    
+    Args:
+        df: Input DataFrame with price data
+        window: Number of periods for moving average
+        price_column: Column to use for calculation
+        ma_type: Type of MA - 'simple' (SMA) or 'exponential' (EMA)
+    
+    Returns:
+        Series with moving average values
+    """
+    if df.empty or len(df) < window:
+        return pd.Series(dtype=float)
+    
+    prices = df[price_column]
+    
+    if ma_type == 'simple':
+        ma = prices.rolling(window=window).mean()
+    
+    elif ma_type == 'exponential':
+        ma = prices.ewm(span=window, adjust=False).mean()
+    
+    else:
+        raise ValueError(f"Invalid ma_type: {ma_type}. Use 'simple' or 'exponential'")
+    
+    return ma
+
+
+def calculate_sma(
+    df: pd.DataFrame,
+    window: int = 20,
+    price_column: str = 'Close'
+) -> pd.Series:
+    """
+    Calculate Simple Moving Average (SMA).
+    
+    Args:
+        df: Input DataFrame with price data
+        window: Number of periods (default: 20)
+        price_column: Column to use for calculation
+    
+    Returns:
+        Series with SMA values
+    """
+    return calculate_moving_average(df, window, price_column, ma_type='simple')
+
+
+def calculate_ema(
+    df: pd.DataFrame,
+    window: int = 20,
+    price_column: str = 'Close'
+) -> pd.Series:
+    """
+    Calculate Exponential Moving Average (EMA).
+    
+    Args:
+        df: Input DataFrame with price data
+        window: Number of periods (default: 20)
+        price_column: Column to use for calculation
+    
+    Returns:
+        Series with EMA values
+    """
+    return calculate_moving_average(df, window, price_column, ma_type='exponential')
+
+
+def calculate_multiple_mas(
+    df: pd.DataFrame,
+    windows: list = [20, 50, 200],
+    price_column: str = 'Close',
+    ma_type: str = 'simple'
+) -> pd.DataFrame:
+    """
+    Calculate multiple moving averages at once.
+    
+    Args:
+        df: Input DataFrame with price data
+        windows: List of window periods (default: [20, 50, 200])
+        price_column: Column to use for calculation
+        ma_type: Type of MA - 'simple' or 'exponential'
+    
+    Returns:
+        DataFrame with moving averages for each window
+    """
+    if df.empty:
+        return pd.DataFrame()
+    
+    ma_df = pd.DataFrame(index=df.index)
+    
+    for window in windows:
+        col_name = f'MA_{window}'
+        ma_df[col_name] = calculate_moving_average(df, window, price_column, ma_type)
+    
+    return ma_df
+
+
+def detect_golden_cross(
+    df: pd.DataFrame,
+    short_window: int = 50,
+    long_window: int = 200,
+    price_column: str = 'Close'
+) -> Optional[pd.Timestamp]:
+    """
+    Detect golden cross (bullish signal when short MA crosses above long MA).
+    
+    Args:
+        df: Input DataFrame with price data
+        short_window: Short-term MA window (default: 50)
+        long_window: Long-term MA window (default: 200)
+        price_column: Column to use for calculation
+    
+    Returns:
+        Date of most recent golden cross, or None if not found
+    """
+    if df.empty or len(df) < long_window:
+        return None
+    
+    short_ma = calculate_sma(df, short_window, price_column)
+    long_ma = calculate_sma(df, long_window, price_column)
+    
+    # Find crossover points (short MA crosses above long MA)
+    crosses = (short_ma > long_ma) & (short_ma.shift(1) <= long_ma.shift(1))
+    
+    if crosses.any():
+        return crosses[crosses].index[-1]
+    
+    return None
+
+
+def detect_death_cross(
+    df: pd.DataFrame,
+    short_window: int = 50,
+    long_window: int = 200,
+    price_column: str = 'Close'
+) -> Optional[pd.Timestamp]:
+    """
+    Detect death cross (bearish signal when short MA crosses below long MA).
+    
+    Args:
+        df: Input DataFrame with price data
+        short_window: Short-term MA window (default: 50)
+        long_window: Long-term MA window (default: 200)
+        price_column: Column to use for calculation
+    
+    Returns:
+        Date of most recent death cross, or None if not found
+    """
+    if df.empty or len(df) < long_window:
+        return None
+    
+    short_ma = calculate_sma(df, short_window, price_column)
+    long_ma = calculate_sma(df, long_window, price_column)
+    
+    # Find crossover points (short MA crosses below long MA)
+    crosses = (short_ma < long_ma) & (short_ma.shift(1) >= long_ma.shift(1))
+    
+    if crosses.any():
+        return crosses[crosses].index[-1]
+    
+    return None
+
+
+def get_moving_average_signals(
+    df: pd.DataFrame,
+    price_column: str = 'Close'
+) -> Dict[str, Any]:
+    """
+    Get current moving average positions and recent crossover signals.
+    
+    Args:
+        df: Input DataFrame with price data
+        price_column: Column to use for calculation
+    
+    Returns:
+        Dictionary with MA signals and positions
+    """
+    if df.empty:
+        return {}
+    
+    # Calculate MAs
+    ma_20 = calculate_sma(df, 20, price_column)
+    ma_50 = calculate_sma(df, 50, price_column)
+    ma_200 = calculate_sma(df, 200, price_column)
+    
+    current_price = df[price_column].iloc[-1]
+    
+    signals = {
+        'current_price': float(current_price),
+        'ma_20': float(ma_20.iloc[-1]) if not ma_20.empty else None,
+        'ma_50': float(ma_50.iloc[-1]) if not ma_50.empty else None,
+        'ma_200': float(ma_200.iloc[-1]) if not ma_200.empty else None,
+        'price_above_ma_20': bool(current_price > ma_20.iloc[-1]) if not ma_20.empty else None,
+        'price_above_ma_50': bool(current_price > ma_50.iloc[-1]) if not ma_50.empty else None,
+        'price_above_ma_200': bool(current_price > ma_200.iloc[-1]) if not ma_200.empty else None,
+    }
+    
+    # Detect crosses
+    golden_cross = detect_golden_cross(df, 50, 200, price_column)
+    death_cross = detect_death_cross(df, 50, 200, price_column)
+    
+    signals['golden_cross_date'] = golden_cross
+    signals['death_cross_date'] = death_cross
+    
+    # Determine trend
+    if len(df) >= 200:
+        if ma_20.iloc[-1] > ma_50.iloc[-1] > ma_200.iloc[-1]:
+            signals['trend'] = 'STRONG_BULLISH'
+        elif ma_20.iloc[-1] > ma_50.iloc[-1]:
+            signals['trend'] = 'BULLISH'
+        elif ma_20.iloc[-1] < ma_50.iloc[-1] < ma_200.iloc[-1]:
+            signals['trend'] = 'STRONG_BEARISH'
+        elif ma_20.iloc[-1] < ma_50.iloc[-1]:
+            signals['trend'] = 'BEARISH'
+        else:
+            signals['trend'] = 'NEUTRAL'
+    else:
+        signals['trend'] = 'INSUFFICIENT_DATA'
+    
+    return signals
+
+
+def get_comprehensive_analysis(
+    df: pd.DataFrame,
+    price_column: str = 'Close'
+) -> Dict[str, Any]:
+    """
+    Get comprehensive financial analysis with all metrics.
+    
+    Combines returns, volatility, drawdown, and moving average analysis
+    into a single comprehensive report.
+    
+    Args:
+        df: Input DataFrame with price data
+        price_column: Column to use for calculations
+    
+    Returns:
+        Dictionary with comprehensive analysis
+    """
+    if df.empty:
+        return {'error': 'Empty DataFrame'}
+    
+    try:
+        analysis = {}
+        
+        # Return metrics
+        analysis['returns'] = {
+            'total': calculate_total_return(df, price_column),
+            'annualized': calculate_annualized_return(df, price_column),
+        }
+        
+        # Risk metrics
+        analysis['risk'] = {
+            'volatility': calculate_volatility(df, price_column),
+            'downside_volatility': calculate_downside_volatility(df, price_column),
+            'max_drawdown': calculate_max_drawdown(df, price_column),
+        }
+        
+        # Drawdown details
+        try:
+            analysis['drawdown_details'] = calculate_drawdown_details(df, price_column)
+        except Exception as e:
+            logger.warning(f"Could not calculate drawdown details: {e}")
+            analysis['drawdown_details'] = {}
+        
+        # Performance ratios
+        analysis['ratios'] = {}
+        if analysis['risk']['volatility'] > 0:
+            analysis['ratios']['sharpe'] = (
+                analysis['returns']['annualized'] / analysis['risk']['volatility']
+            )
+        
+        if abs(analysis['risk']['max_drawdown']) > 0:
+            analysis['ratios']['calmar'] = calculate_calmar_ratio(df, price_column)
+        
+        # Moving averages and signals
+        try:
+            analysis['technical'] = get_moving_average_signals(df, price_column)
+        except Exception as e:
+            logger.warning(f"Could not calculate MA signals: {e}")
+            analysis['technical'] = {}
+        
+        # Summary statistics
+        analysis['summary'] = {
+            'start_date': df.index[0],
+            'end_date': df.index[-1],
+            'trading_days': len(df),
+            'calendar_days': (df.index[-1] - df.index[0]).days,
+            'start_price': float(df[price_column].iloc[0]),
+            'end_price': float(df[price_column].iloc[-1]),
+            'high': float(df[price_column].max()),
+            'low': float(df[price_column].min()),
+        }
+        
+        return analysis
+    
+    except Exception as e:
+        logger.error(f"Error in comprehensive analysis: {e}")
+        return {'error': str(e)}
