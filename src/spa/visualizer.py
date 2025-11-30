@@ -376,7 +376,8 @@ def create_returns_chart(
 
 def create_volatility_chart(
     df: pd.DataFrame,
-    ticker: str = "Stock"
+    ticker: str = "Stock",
+    window: int = 30
 ) -> go.Figure:
     """
     Create volatility analysis chart.
@@ -384,6 +385,7 @@ def create_volatility_chart(
     Args:
         df: DataFrame with price data
         ticker: Stock ticker symbol for title
+        window: Rolling window for volatility calculation
     
     Returns:
         Plotly Figure object
@@ -392,7 +394,52 @@ def create_volatility_chart(
         >>> fig = create_volatility_chart(stock_df, ticker="AAPL")
         >>> fig.show()
     """
-    raise NotImplementedError("Volatility chart implementation pending")
+    # Validate input
+    _validate_dataframe(df, ['Close'])
+    
+    # Calculate rolling volatility
+    rolling_vol = calculate_rolling_volatility(df, window=window, annualize=True)
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add volatility line
+    vol_line = go.Scatter(
+        x=rolling_vol.index,
+        y=rolling_vol * 100,  # Convert to percentage
+        name=f'{window}-Day Rolling Volatility',
+        mode='lines',
+        line=dict(color=COLORS['primary'], width=2),
+        fill='tozeroy',
+        fillcolor='rgba(31, 119, 180, 0.1)'
+    )
+    fig.add_trace(vol_line)
+    
+    # Calculate and add mean volatility line
+    mean_vol = rolling_vol.mean()
+    fig.add_hline(
+        y=mean_vol * 100,
+        line_dash="dash",
+        line_color=COLORS['secondary'],
+        annotation_text=f"Mean: {mean_vol*100:.2f}%",
+        annotation_position="right"
+    )
+    
+    # Update layout
+    layout = create_base_layout(
+        title=f'{ticker} Historical Volatility (Annualized)',
+        xaxis_title="Date",
+        yaxis_title="Volatility (%)",
+        height=600
+    )
+    fig.update_layout(**layout)
+    
+    # Add range selector
+    fig.update_xaxes(rangeselector=_add_range_selector())
+    
+    logger.info(f"Created volatility chart for {ticker}")
+    
+    return fig
 
 
 def create_drawdown_chart(
