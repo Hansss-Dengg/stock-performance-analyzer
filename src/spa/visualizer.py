@@ -460,7 +460,67 @@ def create_drawdown_chart(
         >>> fig = create_drawdown_chart(stock_df, ticker="AAPL")
         >>> fig.show()
     """
-    raise NotImplementedError("Drawdown chart implementation pending")
+    # Validate input
+    _validate_dataframe(df, ['Close'])
+    
+    # Calculate drawdown
+    drawdown = calculate_drawdown(df)
+    
+    # Get drawdown details for annotations
+    try:
+        dd_details = calculate_drawdown_details(df)
+        max_dd = dd_details['max_drawdown']
+        peak_date = dd_details['peak_date']
+        trough_date = dd_details['trough_date']
+    except Exception:
+        max_dd = drawdown.min()
+        peak_date = None
+        trough_date = None
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add drawdown area chart
+    dd_trace = go.Scatter(
+        x=drawdown.index,
+        y=drawdown * 100,  # Convert to percentage
+        name='Drawdown',
+        mode='lines',
+        line=dict(color=COLORS['negative'], width=2),
+        fill='tozeroy',
+        fillcolor='rgba(214, 39, 40, 0.3)'
+    )
+    fig.add_trace(dd_trace)
+    
+    # Add zero line
+    fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.5)
+    
+    # Highlight maximum drawdown period if available
+    if peak_date and trough_date:
+        fig.add_vrect(
+            x0=peak_date, x1=trough_date,
+            fillcolor="rgba(214, 39, 40, 0.1)",
+            layer="below",
+            line_width=0,
+            annotation_text=f"Max DD: {max_dd*100:.2f}%",
+            annotation_position="top left"
+        )
+    
+    # Update layout
+    layout = create_base_layout(
+        title=f'{ticker} Drawdown Analysis',
+        xaxis_title="Date",
+        yaxis_title="Drawdown (%)",
+        height=600
+    )
+    fig.update_layout(**layout)
+    
+    # Add range selector
+    fig.update_xaxes(rangeselector=_add_range_selector())
+    
+    logger.info(f"Created drawdown chart for {ticker}")
+    
+    return fig
 
 
 def create_ma_overlay_chart(
