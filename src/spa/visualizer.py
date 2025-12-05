@@ -543,7 +543,102 @@ def create_ma_overlay_chart(
         >>> fig = create_ma_overlay_chart(stock_df, ticker="AAPL", windows=[50, 200])
         >>> fig.show()
     """
-    raise NotImplementedError("MA overlay chart implementation pending")
+    # Validate input
+    _validate_dataframe(df, ['Close'])
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add price line
+    price_trace = go.Scatter(
+        x=df.index,
+        y=df['Close'],
+        name='Price',
+        mode='lines',
+        line=dict(color=COLORS['primary'], width=2)
+    )
+    fig.add_trace(price_trace)
+    
+    # Define colors for different MA windows
+    ma_colors = {
+        20: COLORS['ma_short'],
+        50: COLORS['secondary'],
+        200: COLORS['ma_long']
+    }
+    
+    # Add moving averages
+    for window in windows:
+        if len(df) >= window:
+            ma = calculate_sma(df, window=window)
+            
+            # Get color for this MA, default to neutral if not defined
+            color = ma_colors.get(window, COLORS['neutral'])
+            
+            ma_trace = go.Scatter(
+                x=ma.index,
+                y=ma,
+                name=f'{window}-day MA',
+                mode='lines',
+                line=dict(color=color, width=1.5, dash='dash')
+            )
+            fig.add_trace(ma_trace)
+    
+    # Detect and mark crossovers if 50 and 200 day MAs are included
+    if 50 in windows and 200 in windows and len(df) >= 200:
+        from .data_processor import detect_golden_cross, detect_death_cross
+        
+        golden = detect_golden_cross(df, short_window=50, long_window=200)
+        death = detect_death_cross(df, short_window=50, long_window=200)
+        
+        # Mark golden cross
+        if golden is not None:
+            price_at_cross = df.loc[golden, 'Close']
+            fig.add_trace(go.Scatter(
+                x=[golden],
+                y=[price_at_cross],
+                mode='markers',
+                marker=dict(
+                    color=COLORS['positive'],
+                    size=12,
+                    symbol='triangle-up',
+                    line=dict(color='white', width=2)
+                ),
+                name='Golden Cross',
+                showlegend=True
+            ))
+        
+        # Mark death cross
+        if death is not None:
+            price_at_cross = df.loc[death, 'Close']
+            fig.add_trace(go.Scatter(
+                x=[death],
+                y=[price_at_cross],
+                mode='markers',
+                marker=dict(
+                    color=COLORS['negative'],
+                    size=12,
+                    symbol='triangle-down',
+                    line=dict(color='white', width=2)
+                ),
+                name='Death Cross',
+                showlegend=True
+            ))
+    
+    # Update layout
+    layout = create_base_layout(
+        title=f'{ticker} Price with Moving Averages',
+        xaxis_title="Date",
+        yaxis_title="Price ($)",
+        height=600
+    )
+    fig.update_layout(**layout)
+    
+    # Add range selector
+    fig.update_xaxes(rangeselector=_add_range_selector())
+    
+    logger.info(f"Created MA overlay chart for {ticker}")
+    
+    return fig
 
 
 def create_comparison_chart(
