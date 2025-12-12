@@ -128,6 +128,12 @@ def sidebar_navigation():
         default=[50, 200]
     )
     
+    # Cache management
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🗑️ Clear Cache", help="Clear all cached data and charts"):
+        st.cache_data.clear()
+        st.sidebar.success("Cache cleared!")
+    
     return {
         'page': page,
         'ticker': ticker,
@@ -139,12 +145,61 @@ def sidebar_navigation():
     }
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_stock_data_cached(ticker: str, start_date: str, end_date: str):
+    """
+    Fetch stock data with Streamlit caching.
+    
+    Args:
+        ticker: Stock ticker symbol
+        start_date: Start date string (YYYY-MM-DD)
+        end_date: End date string (YYYY-MM-DD)
+    
+    Returns:
+        Tuple of (stock_data, stock_info)
+    """
+    # Fetch stock data
+    stock_data = fetch_stock_data(
+        ticker=ticker,
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    # Fetch stock info
+    try:
+        stock_info = get_stock_info(ticker)
+    except Exception as e:
+        logger.warning(f"Could not fetch stock info: {e}")
+        stock_info = {}
+    
+    return stock_data, stock_info
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def compute_analysis_cached(stock_data_dict: dict):
+    """
+    Compute comprehensive analysis with Streamlit caching.
+    
+    Args:
+        stock_data_dict: Dictionary representation of stock data
+    
+    Returns:
+        Analysis dictionary
+    """
+    # Convert dict back to DataFrame
+    stock_data = pd.DataFrame(stock_data_dict)
+    stock_data.index = pd.to_datetime(stock_data.index)
+    
+    # Calculate comprehensive analysis
+    return get_comprehensive_analysis(stock_data)
+
+
 def fetch_and_store_data(ticker: str, start_date, end_date):
     """Fetch stock data and store in session state."""
     try:
         with st.spinner(f"Fetching data for {ticker}..."):
-            # Fetch stock data
-            stock_data = fetch_stock_data(
+            # Use cached fetch function
+            stock_data, stock_info = fetch_stock_data_cached(
                 ticker=ticker,
                 start_date=start_date.strftime('%Y-%m-%d'),
                 end_date=end_date.strftime('%Y-%m-%d')
@@ -154,15 +209,11 @@ def fetch_and_store_data(ticker: str, start_date, end_date):
                 st.error(f"No data found for {ticker}. Please check the ticker symbol and date range.")
                 return False
             
-            # Fetch stock info
-            try:
-                stock_info = get_stock_info(ticker)
-            except Exception as e:
-                logger.warning(f"Could not fetch stock info: {e}")
-                stock_info = {}
-            
-            # Calculate comprehensive analysis
-            analysis = get_comprehensive_analysis(stock_data)
+            # Use cached analysis function
+            # Convert DataFrame to dict for caching (DataFrames aren't hashable)
+            stock_data_dict = stock_data.to_dict()
+            stock_data_dict['index'] = stock_data.index.astype(str).tolist()
+            analysis = compute_analysis_cached(stock_data_dict)
             
             # Store in session state
             st.session_state.stock_data = stock_data
@@ -170,16 +221,67 @@ def fetch_and_store_data(ticker: str, start_date, end_date):
             st.session_state.ticker = ticker
             st.session_state.analysis = analysis
             
-            st.success(f"Successfully fetched data for {ticker}!")
+            st.success(f"✅ Successfully fetched data for {ticker}!")
             return True
     
     except StockDataError as e:
-        st.error(f"Error fetching data: {str(e)}")
+        st.error(f"❌ Error fetching data: {str(e)}")
         return False
     except Exception as e:
-        st.error(f"Unexpected error: {str(e)}")
+        st.error(f"❌ Unexpected error: {str(e)}")
         logger.error(f"Error in fetch_and_store_data: {e}", exc_info=True)
         return False
+
+
+@st.cache_data(show_spinner="Creating chart...")
+def create_cached_price_chart(ticker: str, data_dict: dict, show_volume: bool):
+    """Create price chart with caching."""
+    df = pd.DataFrame(data_dict)
+    df.index = pd.to_datetime(df.index)
+    return create_price_chart(df, ticker=ticker, show_volume=show_volume)
+
+
+@st.cache_data(show_spinner="Creating chart...")
+def create_cached_returns_chart(ticker: str, data_dict: dict):
+    """Create returns chart with caching."""
+    df = pd.DataFrame(data_dict)
+    df.index = pd.to_datetime(df.index)
+    return create_returns_chart(df, ticker=ticker)
+
+
+@st.cache_data(show_spinner="Creating chart...")
+def create_cached_volatility_chart(ticker: str, data_dict: dict, window: int = 30):
+    """Create volatility chart with caching."""
+    df = pd.DataFrame(data_dict)
+    df.index = pd.to_datetime(df.index)
+    return create_volatility_chart(df, ticker=ticker, window=window)
+
+
+@st.cache_data(show_spinner="Creating chart...")
+def create_cached_drawdown_chart(ticker: str, data_dict: dict):
+    """Create drawdown chart with caching."""
+    df = pd.DataFrame(data_dict)
+    df.index = pd.to_datetime(df.index)
+    return create_drawdown_chart(df, ticker=ticker)
+
+
+@st.cache_data(show_spinner="Creating chart...")
+def create_cached_ma_chart(ticker: str, data_dict: dict, windows: list):
+    """Create MA overlay chart with caching."""
+    df = pd.DataFrame(data_dict)
+    df.index = pd.to_datetime(df.index)
+    return create_ma_overlay_chart(df, ticker=ticker, windows=windows)
+
+
+@st.cache_data(show_spinner="Creating chart...")
+def create_cached_comparison_chart(data_dicts: dict, metric: str):
+    """Create comparison chart with caching."""
+    data_dict_converted = {}
+    for ticker, data_dict in data_dicts.items():
+        df = pd.DataFrame(data_dict)
+        df.index = pd.to_datetime(df.index)
+        data_dict_converted[ticker] = df
+    return create_comparison_chart(data_dict_converted, metric=metric)
 
 
 def display_overview_page():
@@ -244,7 +346,9 @@ def display_overview_page():
     # Quick price chart
     st.markdown("---")
     st.subheader("Price History")
-    fig = create_price_chart(stock_data, ticker=ticker, show_volume=True)
+    data_dict = stock_data.to_dict()
+    data_dict['index'] = stock_data.index.astype(str).tolist()
+    fig = create_cached_price_chart(ticker, data_dict, show_volume=True)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -261,7 +365,9 @@ def display_price_analysis_page(show_volume: bool):
     
     st.subheader(f"{ticker} Price History")
     
-    fig = create_price_chart(stock_data, ticker=ticker, show_volume=show_volume)
+    data_dict = stock_data.to_dict()
+    data_dict['index'] = stock_data.index.astype(str).tolist()
+    fig = create_cached_price_chart(ticker, data_dict, show_volume=show_volume)
     st.plotly_chart(fig, use_container_width=True)
     
     # Price statistics
@@ -301,10 +407,12 @@ def display_returns_analysis_page():
     
     st.subheader(f"{ticker} Returns")
     
-    fig = create_returns_chart(stock_data, ticker=ticker)
+    data_dict = stock_data.to_dict()
+    data_dict['index'] = stock_data.index.astype(str).tolist()
+    fig = create_cached_returns_chart(ticker, data_dict)
     st.plotly_chart(fig, use_container_width=True)
     
-    # Returns statistics
+    # Returns statistics3
     st.markdown("---")
     st.subheader("Returns Statistics")
     
@@ -337,7 +445,9 @@ def display_volatility_analysis_page():
     
     st.subheader(f"{ticker} Volatility")
     
-    fig = create_volatility_chart(stock_data, ticker=ticker, window=30)
+    data_dict = stock_data.to_dict()
+    data_dict['index'] = stock_data.index.astype(str).tolist()
+    fig = create_cached_volatility_chart(ticker, data_dict, window=30)
     st.plotly_chart(fig, use_container_width=True)
     
     # Volatility statistics
@@ -370,7 +480,9 @@ def display_drawdown_analysis_page():
     
     st.subheader(f"{ticker} Drawdown")
     
-    fig = create_drawdown_chart(stock_data, ticker=ticker)
+    data_dict = stock_data.to_dict()
+    data_dict['index'] = stock_data.index.astype(str).tolist()
+    fig = create_cached_drawdown_chart(ticker, data_dict)
     st.plotly_chart(fig, use_container_width=True)
     
     # Drawdown statistics
@@ -406,7 +518,9 @@ def display_technical_analysis_page(ma_windows: list):
         st.warning("Please select at least one moving average window from the sidebar.")
         return
     
-    fig = create_ma_overlay_chart(stock_data, ticker=ticker, windows=ma_windows)
+    data_dict = stock_data.to_dict()
+    data_dict['index'] = stock_data.index.astype(str).tolist()
+    fig = create_cached_ma_chart(ticker, data_dict, windows=ma_windows)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -462,10 +576,17 @@ def display_comparison_page():
                     st.error("Could not fetch data for any of the specified tickers.")
                     return
                 
-                fig = create_comparison_chart(data_dict, metric=metric)
+                # Convert DataFrames to dicts for caching
+                data_dicts = {}
+                for ticker, df in data_dict.items():
+                    df_dict = df.to_dict()
+                    df_dict['index'] = df.index.astype(str).tolist()
+                    data_dicts[ticker] = df_dict
+                
+                fig = create_cached_comparison_chart(data_dicts, metric=metric)
                 st.plotly_chart(fig, use_container_width=True)
                 
-                st.success(f"Successfully compared {len(data_dict)} stocks!")
+                st.success(f"✅ Successfully compared {len(data_dict)} stocks!")
         
         except Exception as e:
             st.error(f"Error comparing stocks: {str(e)}")
