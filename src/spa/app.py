@@ -3,14 +3,20 @@ Stock Performance Analyzer - Streamlit Web Application
 
 Main application entry point for the interactive web dashboard.
 """
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
 
-from .data_fetcher import fetch_stock_data, get_stock_info
-from .data_processor import calculate_comprehensive_analysis
-from .visualizer import (
+from spa.data_fetcher import fetch_stock_data, get_stock_info
+from spa.data_processor import get_comprehensive_analysis
+from spa.visualizer import (
     create_price_chart,
     create_returns_chart,
     create_volatility_chart,
@@ -18,7 +24,7 @@ from .visualizer import (
     create_ma_overlay_chart,
     create_comparison_chart
 )
-from .exceptions import StockDataError
+from spa.exceptions import StockDataError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -156,7 +162,7 @@ def fetch_and_store_data(ticker: str, start_date, end_date):
                 stock_info = {}
             
             # Calculate comprehensive analysis
-            analysis = calculate_comprehensive_analysis(stock_data)
+            analysis = get_comprehensive_analysis(stock_data)
             
             # Store in session state
             st.session_state.stock_data = stock_data
@@ -444,7 +450,7 @@ def display_comparison_page():
         
         try:
             with st.spinner("Fetching comparison data..."):
-                from .data_fetcher import fetch_multiple_stocks
+                from spa.data_fetcher import fetch_multiple_stocks
                 
                 data_dict = fetch_multiple_stocks(
                     tickers=tickers,
