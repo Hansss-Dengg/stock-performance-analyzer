@@ -92,8 +92,16 @@ def sidebar_navigation():
     ticker = st.sidebar.text_input(
         "Enter Stock Ticker",
         value="AAPL",
-        help="Enter a valid stock ticker symbol (e.g., AAPL, MSFT, GOOGL)"
-    ).upper()
+        help="Enter a valid stock ticker symbol (e.g., AAPL, MSFT, GOOGL)",
+        max_chars=10
+    ).upper().strip()
+    
+    # Validate ticker format
+    ticker_valid = True
+    if ticker:
+        if not ticker.replace('.', '').replace('-', '').isalnum():
+            st.sidebar.error("⚠️ Ticker should only contain letters, numbers, dots, or hyphens")
+            ticker_valid = False
     
     # Date range selection
     st.sidebar.subheader("Date Range")
@@ -114,8 +122,26 @@ def sidebar_navigation():
             max_value=datetime.now()
         )
     
-    # Fetch data button
-    fetch_button = st.sidebar.button("Fetch Data", type="primary", use_container_width=True)
+    # Validate date range
+    date_valid = True
+    if start_date >= end_date:
+        st.sidebar.error("⚠️ Start date must be before end date")
+        date_valid = False
+    elif (end_date - start_date).days < 7:
+        st.sidebar.warning("⚠️ Date range is very short. Consider at least 1 month for meaningful analysis.")
+    elif (end_date - start_date).days > 365 * 20:
+        st.sidebar.warning("⚠️ Very long date range may slow down loading.")
+    
+    # Fetch data button (disabled if validation fails)
+    fetch_button = st.sidebar.button(
+        "Fetch Data", 
+        type="primary", 
+        use_container_width=True,
+        disabled=not (ticker_valid and date_valid and ticker)
+    )
+    
+    if not ticker:
+        st.sidebar.info("💡 Enter a ticker symbol to begin")
     
     # Additional options
     st.sidebar.markdown("---")
@@ -206,8 +232,26 @@ def fetch_and_store_data(ticker: str, start_date, end_date):
             )
             
             if stock_data.empty:
-                st.error(f"No data found for {ticker}. Please check the ticker symbol and date range.")
+                st.error(
+                    f"❌ No data found for **{ticker}**\n\n"
+                    "**Possible reasons:**\n"
+                    "- Invalid ticker symbol\n"
+                    "- Stock not traded during this period\n"
+                    "- Data not available from Yahoo Finance\n\n"
+                    "**Suggestions:**\n"
+                    "- Verify ticker symbol is correct\n"
+                    "- Try a different date range\n"
+                    "- Check if the company is publicly traded"
+                )
                 return False
+            
+            # Check if we have sufficient data
+            data_points = len(stock_data)
+            if data_points < 30:
+                st.warning(
+                    f"⚠️ Only {data_points} data points available. "
+                    "Some metrics may be less accurate with limited data."
+                )
             
             # Use cached analysis function
             # Convert DataFrame to dict for caching (DataFrames aren't hashable)
@@ -221,14 +265,40 @@ def fetch_and_store_data(ticker: str, start_date, end_date):
             st.session_state.ticker = ticker
             st.session_state.analysis = analysis
             
-            st.success(f"✅ Successfully fetched data for {ticker}!")
+            # Show success message with data summary
+            st.success(
+                f"✅ Successfully fetched **{ticker}** data!\n\n"
+                f"📊 **{data_points}** trading days from "
+                f"**{stock_data.index[0].strftime('%Y-%m-%d')}** to "
+                f"**{stock_data.index[-1].strftime('%Y-%m-%d')}**"
+            )
             return True
     
     except StockDataError as e:
-        st.error(f"❌ Error fetching data: {str(e)}")
+        st.error(
+            f"❌ **Data Fetch Error**\n\n"
+            f"{str(e)}\n\n"
+            "Please try again or contact support if the issue persists."
+        )
+        return False
+    except ConnectionError:
+        st.error(
+            "❌ **Connection Error**\n\n"
+            "Unable to connect to Yahoo Finance. Please check:\n"
+            "- Your internet connection\n"
+            "- Yahoo Finance service status\n\n"
+            "Try again in a few moments."
+        )
         return False
     except Exception as e:
-        st.error(f"❌ Unexpected error: {str(e)}")
+        st.error(
+            f"❌ **Unexpected Error**\n\n"
+            f"```\n{str(e)}\n```\n\n"
+            "Please try again. If the error persists, try:\n"
+            "- Using the 'Clear Cache' button\n"
+            "- Refreshing the page\n"
+            "- Selecting a different date range"
+        )
         logger.error(f"Error in fetch_and_store_data: {e}", exc_info=True)
         return False
 
@@ -289,7 +359,39 @@ def display_overview_page():
     st.markdown('<div class="main-header">📈 Stock Overview</div>', unsafe_allow_html=True)
     
     if st.session_state.stock_data is None:
-        st.info("👈 Enter a stock ticker and fetch data to get started!")
+        st.info("👈 **Get Started:** Enter a stock ticker in the sidebar and click 'Fetch Data'")
+        
+        # Quick start guide
+        st.markdown("---")
+        st.subheader("📚 Quick Start Guide")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            **Popular Stock Tickers:**
+            - **AAPL** - Apple Inc.
+            - **MSFT** - Microsoft
+            - **GOOGL** - Alphabet (Google)
+            - **TSLA** - Tesla
+            - **AMZN** - Amazon
+            - **NVDA** - NVIDIA
+            - **META** - Meta (Facebook)
+            """)
+        
+        with col2:
+            st.markdown("""
+            **Features:**
+            - 📊 Price analysis with candlestick charts
+            - 💰 Returns and performance metrics
+            - 📉 Volatility and risk analysis
+            - 📈 Drawdown tracking
+            - 🎯 Technical indicators (Moving Averages)
+            - 🔄 Multi-stock comparison
+            """)
+        
+        st.markdown("---")
+        st.markdown("💡 **Tip:** Data is cached for 1 hour to speed up your analysis!")
         return
     
     ticker = st.session_state.ticker
@@ -556,14 +658,24 @@ def display_comparison_page():
     compare_button = st.button("Compare Stocks", type="primary")
     
     if compare_button:
-        tickers = [t.strip().upper() for t in tickers_input.split(',')]
+        tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip()]
         
+        # Validation
         if len(tickers) < 2:
-            st.error("Please enter at least 2 stock tickers for comparison.")
+            st.error("❌ Please enter at least **2 stock tickers** for comparison.")
             return
         
+        if len(tickers) > 10:
+            st.error("❌ Too many tickers! Please compare **10 or fewer** stocks at once.")
+            return
+        
+        # Check for duplicates
+        if len(tickers) != len(set(tickers)):
+            st.warning("⚠️ Duplicate tickers removed")
+            tickers = list(set(tickers))
+        
         try:
-            with st.spinner("Fetching comparison data..."):
+            with st.spinner(f"Fetching data for {len(tickers)} stocks..."):
                 from spa.data_fetcher import fetch_multiple_stocks
                 
                 data_dict = fetch_multiple_stocks(
@@ -573,8 +685,23 @@ def display_comparison_page():
                 )
                 
                 if not data_dict:
-                    st.error("Could not fetch data for any of the specified tickers.")
+                    st.error(
+                        "❌ **No Data Found**\n\n"
+                        "Could not fetch data for any of the specified tickers.\n\n"
+                        "**Please verify:**\n"
+                        "- Ticker symbols are correct\n"
+                        "- Stocks were trading during the selected period\n"
+                        "- Date range is valid"
+                    )
                     return
+                
+                # Report which tickers failed
+                failed_tickers = set(tickers) - set(data_dict.keys())
+                if failed_tickers:
+                    st.warning(
+                        f"⚠️ Could not fetch data for: **{', '.join(sorted(failed_tickers))}**\n\n"
+                        f"Comparing {len(data_dict)} stock(s): **{', '.join(sorted(data_dict.keys()))}**"
+                    )
                 
                 # Convert DataFrames to dicts for caching
                 data_dicts = {}
@@ -586,10 +713,25 @@ def display_comparison_page():
                 fig = create_cached_comparison_chart(data_dicts, metric=metric)
                 st.plotly_chart(fig, use_container_width=True)
                 
-                st.success(f"✅ Successfully compared {len(data_dict)} stocks!")
+                st.success(
+                    f"✅ Successfully compared **{len(data_dict)}** stocks!\n\n"
+                    f"Showing {metric} comparison"
+                )
         
+        except ConnectionError:
+            st.error(
+                "❌ **Connection Error**\n\n"
+                "Unable to fetch comparison data. Please check your internet connection."
+            )
         except Exception as e:
-            st.error(f"Error comparing stocks: {str(e)}")
+            st.error(
+                f"❌ **Comparison Error**\n\n"
+                f"```\n{str(e)}\n```\n\n"
+                "**Suggestions:**\n"
+                "- Verify all ticker symbols are valid\n"
+                "- Try with fewer stocks\n"
+                "- Clear cache and try again"
+            )
             logger.error(f"Error in comparison: {e}", exc_info=True)
 
 
