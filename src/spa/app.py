@@ -2,6 +2,12 @@
 Stock Performance Analyzer - Streamlit Web Application
 
 Main application entry point for the interactive web dashboard.
+
+Performance optimizations:
+- Streamlit caching with 1-hour TTL
+- Progress indicators for long operations
+- Efficient data serialization for caching
+- Chart rendering optimizations
 """
 import sys
 from pathlib import Path
@@ -13,6 +19,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
+
+# Configure pandas display options for better performance
+pd.options.plotting.backend = "plotly"
 
 from spa.data_fetcher import fetch_stock_data, get_stock_info
 from spa.data_processor import get_comprehensive_analysis
@@ -47,15 +56,35 @@ st.markdown("""
         color: #1f77b4;
         text-align: center;
         padding: 1rem 0;
+        margin-bottom: 1.5rem;
     }
     .metric-card {
         background-color: #f0f2f6;
         padding: 1rem;
         border-radius: 0.5rem;
         margin: 0.5rem 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .stAlert {
         margin-top: 1rem;
+    }
+    .export-section {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    /* Improve button styling */
+    .stDownloadButton button {
+        width: 100%;
+    }
+    /* Improve metric display */
+    [data-testid="stMetricValue"] {
+        font-size: 1.8rem;
+    }
+    /* Improve sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #f8f9fa;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -71,6 +100,10 @@ def initialize_session_state():
         st.session_state.ticker = None
     if 'analysis' not in st.session_state:
         st.session_state.analysis = None
+    if 'last_fetch_time' not in st.session_state:
+        st.session_state.last_fetch_time = None
+    if 'fetch_count' not in st.session_state:
+        st.session_state.fetch_count = 0
 
 
 def sidebar_navigation():
@@ -156,9 +189,29 @@ def sidebar_navigation():
     
     # Cache management
     st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Settings")
+    
     if st.sidebar.button("🗑️ Clear Cache", help="Clear all cached data and charts"):
         st.cache_data.clear()
         st.sidebar.success("Cache cleared!")
+    
+    # Session info
+    if st.session_state.stock_data is not None:
+        st.sidebar.markdown("---")
+        st.sidebar.caption("📊 **Current Session**")
+        st.sidebar.caption(f"Ticker: **{st.session_state.ticker}**")
+        st.sidebar.caption(f"Data points: **{len(st.session_state.stock_data)}**")
+        if st.session_state.last_fetch_time:
+            time_ago = datetime.now() - st.session_state.last_fetch_time
+            minutes_ago = int(time_ago.total_seconds() / 60)
+            st.sidebar.caption(f"Fetched: **{minutes_ago}m ago**")
+    
+    # App info
+    st.sidebar.markdown("---")
+    st.sidebar.caption("💡 **Tips:**")
+    st.sidebar.caption("• Data cached for 1 hour")
+    st.sidebar.caption("• Charts are interactive")
+    st.sidebar.caption("• Download any chart or data")
     
     return {
         'page': page,
@@ -223,13 +276,17 @@ def compute_analysis_cached(stock_data_dict: dict):
 def fetch_and_store_data(ticker: str, start_date, end_date):
     """Fetch stock data and store in session state."""
     try:
-        with st.spinner(f"Fetching data for {ticker}..."):
-            # Use cached fetch function
-            stock_data, stock_info = fetch_stock_data_cached(
-                ticker=ticker,
-                start_date=start_date.strftime('%Y-%m-%d'),
-                end_date=end_date.strftime('%Y-%m-%d')
-            )
+        # Progress bar
+        progress_bar = st.progress(0, text=f"Fetching data for {ticker}...")
+        
+        # Fetch stock data
+        progress_bar.progress(25, text="Fetching stock data...")
+        stock_data, stock_info = fetch_stock_data_cached(
+            ticker=ticker,
+            start_date=start_date.strftime('%Y-%m-%d'),
+            end_date=end_date.strftime('%Y-%m-%d')
+        )
+        progress_bar.progress(50, text="Data fetched successfully...")
             
             if stock_data.empty:
                 st.error(
@@ -253,6 +310,8 @@ def fetch_and_store_data(ticker: str, start_date, end_date):
                     "Some metrics may be less accurate with limited data."
                 )
             
+            # Calculate analysis
+            progress_bar.progress(75, text="Calculating metrics...")
             # Use cached analysis function
             # Convert DataFrame to dict for caching (DataFrames aren't hashable)
             stock_data_dict = stock_data.to_dict()
@@ -260,10 +319,16 @@ def fetch_and_store_data(ticker: str, start_date, end_date):
             analysis = compute_analysis_cached(stock_data_dict)
             
             # Store in session state
+            progress_bar.progress(100, text="Complete!")
             st.session_state.stock_data = stock_data
             st.session_state.stock_info = stock_info
             st.session_state.ticker = ticker
             st.session_state.analysis = analysis
+            st.session_state.last_fetch_time = datetime.now()
+            st.session_state.fetch_count += 1
+            
+            # Clear progress bar
+            progress_bar.empty()
             
             # Show success message with data summary
             st.success(
@@ -923,12 +988,27 @@ def main():
     
     # Footer
     st.markdown("---")
-    st.markdown(
-        "<div style='text-align: center; color: #666;'>"
-        "Stock Performance Analyzer | Built with Streamlit & Python"
-        "</div>",
-        unsafe_allow_html=True
-    )
+    
+    footer_col1, footer_col2, footer_col3 = st.columns([1, 2, 1])
+    
+    with footer_col1:
+        if st.session_state.fetch_count > 0:
+            st.caption(f"📊 Fetches: {st.session_state.fetch_count}")
+    
+    with footer_col2:
+        st.markdown(
+            "<div style='text-align: center; color: #666;'>"
+            "Stock Performance Analyzer | Built with Streamlit & Python<br>"
+            "<small>Data from Yahoo Finance • Cached for optimal performance</small>"
+            "</div>",
+            unsafe_allow_html=True
+        )
+    
+    with footer_col3:
+        st.caption(
+            "[GitHub](https://github.com/Hansss-Dengg/stock-performance-analyzer)",
+            unsafe_allow_html=True
+        )
 
 
 if __name__ == "__main__":
