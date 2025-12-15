@@ -1,10 +1,10 @@
 # Stock Performance Analyzer
 
-A powerful financial analysis web application that provides comprehensive stock performance metrics, interactive visualizations, and multi-stock comparisons. Track returns, volatility, drawdowns, and technical indicators with real-time data from Yahoo Finance.
+A financial analysis web application that provides comprehensive stock performance metrics, interactive visualizations, and multi-stock comparisons. Track returns, volatility, drawdowns, and technical indicators with real-time data from Yahoo Finance.
 
 ## Features
 
-**Authentication and Data Management:** Integrates with Yahoo Finance API for real-time stock data. Implements intelligent caching with 24-hour TTL to reduce API calls by 90%. Automatic retry logic with exponential backoff ensures reliable data fetching.
+**Data Management:** Integrates with Yahoo Finance API for real-time stock data (no API key required). Implements intelligent caching with 24-hour TTL to reduce API calls by 90%. Automatic retry logic with exponential backoff ensures reliable data fetching.
 
 **Financial Analysis:** Calculate 30+ financial metrics including daily/cumulative/annualized returns, standard and rolling volatility, maximum drawdown analysis, and performance ratios (Sharpe, Sortino, Calmar). Advanced technical indicators with moving averages and golden/death cross detection.
 
@@ -70,37 +70,27 @@ The app will open in your browser at `http://localhost:8501`
 
 You can create your own front-end to interface with user analysis and data as they're implemented through a backend RESTful API.
 
-### API Endpoints:
+### Core Modules:
 
-#### `/api/stock/fetch`
-- **method:** POST
-- **headers:**
-  - Authorization: `<API access token>`
-- Fetches stock data from Yahoo Finance and stores in cache
+#### `data_fetcher`
+- Fetches stock data from Yahoo Finance (no API key required)
+- Automatic caching with 24-hour TTL
+- Retry logic with exponential backoff
 
-#### `/api/stock/analyze`
-- **method:** GET
-- **headers:**
-  - Authorization: `<API access token>`
-- Returns comprehensive analysis of stock metrics
+#### `data_processor`
+- Comprehensive financial analysis (30+ metrics)
+- Returns, volatility, drawdown calculations
+- Risk ratios (Sharpe, Sortino, Calmar)
 
-#### `/api/stock/chart`
-- **method:** POST
-- **headers:**
-  - Authorization: `<API access token>`
-- Generates interactive chart for specified metric
+#### `visualizer`
+- Creates 6+ interactive Plotly charts
+- Candlestick, returns, volatility, drawdown charts
+- Multi-stock comparison visualizations
 
-#### `/api/stock/export`
-- **method:** GET
-- **headers:**
-  - Authorization: `<API access token>`
-- Downloads analysis data in specified format (CSV, JSON, HTML)
-
-#### `/api/stock/compare`
-- **method:** POST
-- **headers:**
-  - Authorization: `<API access token>`
-- Compares multiple stocks and returns normalized data
+#### `data_cleaner`
+- Input validation and data normalization
+- Handles missing data and outliers
+- Ensures data quality for analysis
 
 ---
 
